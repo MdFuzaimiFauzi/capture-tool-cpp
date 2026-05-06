@@ -12,6 +12,8 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <QComboBox>
+#include <QSize>
 
 using namespace std;
 using namespace cv;
@@ -43,9 +45,17 @@ int main(int argc, char *argv[]) {
     durationBox->setValue(5);
 
     QPushButton *captureBtn = new QPushButton("Capture Single Frame", &window);
-    QPushButton *recordBtn = new QPushButton("Record Dataset Video", &window);
+    QPushButton *recordBtn = new QPushButton("Record Video", &window);
+
+    QComboBox *resolutionBox = new QComboBox(&window);
+    resolutionBox->addItem("1080p (1920 x 1080)", QSize(1920, 1080));
+    resolutionBox->addItem("720p (1280 x 720)", QSize(1280, 720));
+    resolutionBox->addItem("480p (640 x 480)", QSize(640, 480));
+    // Set default to 720p
+    resolutionBox->setCurrentIndex(1);
 
     QHBoxLayout *controlsLayout = new QHBoxLayout;
+    controlsLayout->addWidget(resolutionBox);
     controlsLayout->addWidget(countdownBox);
     controlsLayout->addWidget(durationBox);
     controlsLayout->addWidget(captureBtn);
@@ -57,15 +67,42 @@ int main(int argc, char *argv[]) {
     mainLayout->addWidget(statusLabel);
     window.setLayout(mainLayout);
 
-    string pipeline = "libcamerasrc ! video/x-raw, width=1280, height=720, framerate=30/1, format=RGBx ! videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false";
-    VideoCapture cap(pipeline, CAP_GSTREAMER);
-    
-    if (!cap.isOpened()) {
-        statusLabel->setText("GStreamer pipeline failed. Falling back to native V4L2...");
-        cap.open(0, CAP_V4L2);
-    }
+    VideoCapture cap;
+    int cameraFps = 30;
+    int cameraWidth = 1280;
+    int cameraHeight = 720;
 
-    if (!cap.isOpened()) {
+    auto openCamera = [&](int width, int height) -> bool {
+        if (cap.isOpened()) {
+            cap.release();
+        }
+
+        string pipeline = "libcamerasrc af-mode=continuous ! video/x-raw, width=" + to_string(width) + 
+                          ", height=" + to_string(height) + ", framerate=" + to_string(cameraFps) + 
+                          "/1, format=RGBx ! videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false";
+        
+        cap.open(pipeline, CAP_GSTREAMER);
+        
+        if (!cap.isOpened()) {
+            cap.open(0, CAP_V4L2);
+            if (cap.isOpened()) {
+                cap.set(CAP_PROP_FRAME_WIDTH, width);
+                cap.set(CAP_PROP_FRAME_HEIGHT, height);
+                cap.set(CAP_PROP_AUTOFOCUS, 1);
+            }
+        }
+
+        if (cap.isOpened()) {
+            cameraWidth = width;
+            cameraHeight = height;
+            statusLabel->setText(QString("Camera at %1 x %2").arg(cameraWidth).arg(cameraHeight));
+            return true;
+        }
+
+        return false;
+    };
+
+    if (!openCamera(cameraWidth, cameraHeight)) {
         feedLabel->setText("Fatal Error: Camera module not accessible.");
         return -1;
     }
@@ -75,6 +112,23 @@ int main(int argc, char *argv[]) {
     bool isRecording = false;
     int targetFrames = 0;
     int framesRecorded = 0;
+
+    QObject::connect(resolutionBox, QOverload<int>::of(&QComboBox::currentIndexChanged), [&](int index) {
+        if (isRecording) {
+            statusLabel->setText("Cannot change resolution while recording.");
+            return;
+        }
+        QSize selectedSize = resolutionBox->itemData(index).toSize();
+        timer->stop();
+        feedLabel->setText("Switching camera resolution...");
+        QCoreApplication::processEvents();
+
+        if (!openCamera(selectedSize.width(), selectedSize.height())) {
+            feedLabel->setText("Failed to switch camera resolution.");
+            statusLabel->setText("Camera reopen failed.");
+        }
+        timer->start(1000 / cameraFps);
+    });
 
     QObject::connect(timer, &QTimer::timeout, [&]() {
         Mat frame;
@@ -91,7 +145,8 @@ int main(int argc, char *argv[]) {
                 writer.release();
                 recordBtn->setEnabled(true);
                 captureBtn->setEnabled(true);
-                statusLabel->setText("Dataset video successfully saved to this folder.");
+                resolutionBox->setEnabled(true);
+                statusLabel->setText("Recorded Video successfully saved to this folder.");
             }
         }
 
@@ -101,7 +156,7 @@ int main(int argc, char *argv[]) {
         feedLabel->setPixmap(QPixmap::fromImage(img).scaled(feedLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     });
     
-    timer->start(33); 
+    timer->start(1000 / cameraFps); 
 
     QObject::connect(captureBtn, &QPushButton::clicked, [&]() {
         Mat frame;
@@ -116,6 +171,7 @@ int main(int argc, char *argv[]) {
     QObject::connect(recordBtn, &QPushButton::clicked, [&]() {
         recordBtn->setEnabled(false);
         captureBtn->setEnabled(false);
+        resolutionBox->setEnabled(false);
         int countdown = countdownBox->value();
         int duration = durationBox->value();
 
@@ -129,7 +185,7 @@ int main(int argc, char *argv[]) {
         framesRecorded = 0;
         QString filename = "video_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".avi";
         
-        writer.open(filename.toStdString(), VideoWriter::fourcc('M','J','P','G'), 30, Size(cap.get(CAP_PROP_FRAME_WIDTH), cap.get(CAP_PROP_FRAME_HEIGHT)));
+        writer.open(filename.toStdString(), VideoWriter::fourcc('M','J','P','G'), cameraFps, Size(cameraWidth, cameraHeight));
 
         if (writer.isOpened()) {
             isRecording = true;
@@ -138,6 +194,7 @@ int main(int argc, char *argv[]) {
             statusLabel->setText("Error creating the video file payload.");
             recordBtn->setEnabled(true);
             captureBtn->setEnabled(true);
+            resolutionBox->setEnabled(true);
         }
     });
 
