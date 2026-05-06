@@ -14,6 +14,7 @@
 #include <chrono>
 #include <QComboBox>
 #include <QSize>
+#include <QProcess>
 
 using namespace std;
 using namespace cv;
@@ -52,6 +53,9 @@ int main(int argc, char *argv[]) {
     QPushButton *recordBtn = new QPushButton("Record Video", &window);
     recordBtn->setToolTip("Starts recording an AVI video after the countdown finishes.");
 
+    QPushButton *serverBtn = new QPushButton("Start Web Server", &window);
+    serverBtn->setToolTip("Starts a local web server on port 8080 to download files via browser.");
+
     QComboBox *resolutionBox = new QComboBox(&window);
     resolutionBox->addItem("1080p (1920 x 1080)", QSize(1920, 1080));
     resolutionBox->addItem("720p (1280 x 720)", QSize(1280, 720));
@@ -74,6 +78,7 @@ int main(int argc, char *argv[]) {
     controlsLayout->addWidget(durationBox);
     controlsLayout->addWidget(captureBtn);
     controlsLayout->addWidget(recordBtn);
+    controlsLayout->addWidget(serverBtn);
 
     QVBoxLayout *mainLayout = new QVBoxLayout;
     mainLayout->addWidget(feedLabel);
@@ -210,6 +215,30 @@ int main(int argc, char *argv[]) {
             recordBtn->setEnabled(true);
             captureBtn->setEnabled(true);
             resolutionBox->setEnabled(true);
+        }
+    });
+
+    QProcess *webServerProcess = new QProcess(&window);
+    QObject::connect(serverBtn, &QPushButton::clicked, [&]() {
+        if (webServerProcess->state() == QProcess::NotRunning) {
+            webServerProcess->start("python3", QStringList() << "-m" << "http.server" << "8080");
+            serverBtn->setText("Stop Web Server");
+            serverBtn->setStyleSheet("background-color: darkgreen; color: white;");
+            
+            QProcess ipProcess;
+            ipProcess.start("hostname", QStringList() << "-I");
+            ipProcess.waitForFinished();
+            QString ipOutput = QString(ipProcess.readAllStandardOutput()).trimmed().split(" ").first();
+            if (ipOutput.isEmpty()) ipOutput = "localhost";
+            
+            statusLabel->setText(QString("Available on http://%1:8080").arg(ipOutput));
+        } else {
+            webServerProcess->terminate();
+            webServerProcess->waitForFinished(1000);
+            webServerProcess->kill(); 
+            serverBtn->setText("Start Web Server");
+            serverBtn->setStyleSheet(""); 
+            statusLabel->setText("Web server stopped.");
         }
     });
 
