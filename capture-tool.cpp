@@ -37,15 +37,20 @@ int main(int argc, char *argv[]) {
     countdownBox->setPrefix("Countdown: ");
     countdownBox->setSuffix(" seconds");
     countdownBox->setValue(3);
+    countdownBox->setToolTip("Delay in seconds before the video recording actually starts.");
 
     QSpinBox *durationBox = new QSpinBox(&window);
     durationBox->setRange(1, 120);
     durationBox->setPrefix("Duration: ");
     durationBox->setSuffix(" seconds");
     durationBox->setValue(5);
+    durationBox->setToolTip("Length of the video to record in seconds.");
 
     QPushButton *captureBtn = new QPushButton("Capture Single Frame", &window);
+    captureBtn->setToolTip("Takes a single snapshot from the camera and saves it as a JPG image.");
+    
     QPushButton *recordBtn = new QPushButton("Record Video", &window);
+    recordBtn->setToolTip("Starts recording an AVI video after the countdown finishes.");
 
     QComboBox *resolutionBox = new QComboBox(&window);
     resolutionBox->addItem("1080p (1920 x 1080)", QSize(1920, 1080));
@@ -53,9 +58,18 @@ int main(int argc, char *argv[]) {
     resolutionBox->addItem("480p (640 x 480)", QSize(640, 480));
     // Set default to 720p
     resolutionBox->setCurrentIndex(1);
+    resolutionBox->setToolTip("Select the camera's capture resolution.");
+
+    QComboBox *formatBox = new QComboBox(&window);
+    formatBox->addItem("JPG");
+    formatBox->addItem("PNG");
+    formatBox->addItem("BMP");
+    formatBox->addItem("TIFF");
+    formatBox->setToolTip("Select the file format for captured frames.");
 
     QHBoxLayout *controlsLayout = new QHBoxLayout;
     controlsLayout->addWidget(resolutionBox);
+    controlsLayout->addWidget(formatBox);
     controlsLayout->addWidget(countdownBox);
     controlsLayout->addWidget(durationBox);
     controlsLayout->addWidget(captureBtn);
@@ -162,7 +176,8 @@ int main(int argc, char *argv[]) {
         Mat frame;
         cap.read(frame);
         if (!frame.empty()) {
-            QString filename = "frame_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".jpg";
+            QString ext = formatBox->currentText().toLower();
+            QString filename = "frame_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + "." + ext;
             imwrite(filename.toStdString(), frame);
             statusLabel->setText("Captured and saved " + filename + " to this folder.");
         }
